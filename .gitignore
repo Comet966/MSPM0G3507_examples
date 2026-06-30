@@ -1,0 +1,21 @@
+# Build output
+Debug/
+
+# macOS
+.DS_Store
+
+# CCS / Clangd cache
+.clangd/
+
+# Claude Code & agent runtime files
+.claude/
+.agents/
+.codex/
+skills-lock.json
+
+# Theia IDE workspace state
+.theia/
+.mcp.json
+
+# Generated HTML (keep .md source only)
+README.html
