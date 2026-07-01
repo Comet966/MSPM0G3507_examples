@@ -12,6 +12,7 @@ Debug/
 .agents/
 .codex/
 skills-lock.json
+CLAUDE.md
 
 # Theia IDE workspace state
 .theia/
