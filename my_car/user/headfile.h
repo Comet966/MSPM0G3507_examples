@@ -18,20 +18,21 @@
 #include "Timer.h"    /* Phase 1 */
 #include "Uart.h"     /* Phase 1 */
 #include "Pwm.h"      /* Phase 3 */
+#include "EncoderExti.h" /* Phase 4 */
 /* #include "EncoderExti.h" (Phase 4) */
 /* #include "Stepper.h"  (Phase 9) */
 /* #include "IIC.h"      (Phase 7) */
 
 /* ---- Algorithm layer ---- */
-/* #include "pid.h"      (Phase 4) */
+#include "pid.h"      /* Phase 4 */
 
 /* ---- FunctionalModule layer ---- */
 #include "MotorsCtrl.h"  /* Phase 3 */
-/* #include "Encoder.h"     (Phase 4) */
+#include "Encoder.h"     /* Phase 4 */
 /* #include "GraySensor.h"  (Phase 5) */
 #include "Buzzer.h"      /* Phase 2 */
 #include "Key.h"         /* Phase 2 */
-/* #include "Oled.h"        (Phase 7) */
+#include "oled.h"        /* Phase 7 (pulled in early as a debug display) */
 /* #include "Imu.h"         (Phase 8) */
 /* #include "Gimbal.h"      (Phase 9) */
 /* #include "Vision.h"      (Phase 10) */
@@ -41,11 +42,14 @@
 
 /*========================= Tunable parameters =========================*/
 
-/* Wheel-speed PID (per wheel). Retune for MG513 + this chassis. */
+/* Wheel-speed PID (per wheel). Retuned for MG513 + this chassis.
+ * KD=0: the cm/s feedback is coarsely quantized (~2 counts per 5 ms window at
+ * 30 cm/s), so any KD amplifies that noise into output jitter -> wheels dither
+ * around zero and flip direction. Start P-dominant, tiny I, no D; add back later. */
 #define BrushMotor_PID_mode     PID_POSITION
 #define BrushMotor_PID_KP       10.0f
-#define BrushMotor_PID_KI       0.8f
-#define BrushMotor_PID_KD       5.0f
+#define BrushMotor_PID_KI       0.1f
+#define BrushMotor_PID_KD       0.0f
 #define BrushMotor_PID_Maxout   1000.0f
 #define BrushMotor_PID_MaxIout  1000.0f
 

@@ -75,9 +75,11 @@ typedef struct
 /* Incremental encoder (one per drive wheel). EncoderCount written by EXTI ISR. */
 typedef struct
 {
-    volatile int32_t EncoderCount; /* signed edge count since last read */
-    float pos;                     /* accumulated distance (m) */
-    float vel;                     /* wheel linear velocity (m/s) */
+    volatile int32_t EncoderCount; /* signed edge count accumulated by ISR since last sample */
+    int32_t          sample;       /* edges captured in the last 200 Hz window (count snapshot) */
+    float            vel;          /* wheel angular velocity (rad/s), low-pass filtered */
+    float            V;            /* wheel linear velocity (cm/s) = vel * TireRadius */
+    float            X;            /* accumulated distance travelled (cm) */
 } Encoder_t;
 
 /* PID controller (Algorithm/pid.c). Layout must match reference pid.c. */

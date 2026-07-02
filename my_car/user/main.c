@@ -7,105 +7,85 @@ Car_t Car;
  * Full TaskInit (state machine) lands in Phase 6. */
 static Task_t s_task;
 
-/* ---- Phase 3 open-loop motor self-test ---------------------------------
- * When running (press S2), step through a fixed pattern so each wheel's
- * direction/PWM can be verified with wheels off the ground. One step per
- * ~1.5 s (advanced from duty_10hz). Stop (S2 again) -> wheels off. */
-#define TEST_DUTY        300   /* 30% of 1000 — gentle, audible spin */
-#define STEP_TICKS_10HZ  15    /* 15 * 100 ms = 1.5 s per step */
-
-static const char* const s_stepName[6] = {
-    "FWD  (both +)", "STOP", "REV  (both -)", "STOP",
-    "LEFT fwd only", "RIGHT fwd only",
-};
-
-static void motor_test_step(uint8_t step)
-{
-    switch (step) {
-        case 0: MotorSetOpenLoop(Car.Motors,  TEST_DUTY,  TEST_DUTY); break; /* forward */
-        case 1: MotorSetOpenLoop(Car.Motors,  0,          0);         break;
-        case 2: MotorSetOpenLoop(Car.Motors, -TEST_DUTY, -TEST_DUTY); break; /* reverse */
-        case 3: MotorSetOpenLoop(Car.Motors,  0,          0);         break;
-        case 4: MotorSetOpenLoop(Car.Motors,  TEST_DUTY,  0);         break; /* left only */
-        case 5: MotorSetOpenLoop(Car.Motors,  0,          TEST_DUTY); break; /* right only */
-        default: break;
-    }
-}
+/* ---- Phase 4 closed-loop speed test (OLED-instrumented) ----------------
+ * Serial telemetry proved unreliable (log-replay artifact in the tooling), so
+ * we display encoder + PID state on the OLED instead. Transparent to the logic.
+ *
+ * Stopped: hand-spin each wheel; watch L/R counts + velocity to check sign.
+ * Running (press S2): drive straight at TARGET_SPEED via wheel-speed PID;
+ * the display shows setpoint vs measured V so we can confirm the loop holds. */
+#define TARGET_SPEED  30.0f   /* cm/s forward setpoint for the closed-loop test */
 
 int main(void)
 {
     SYSCFG_DL_init();
 
     SystemInit_Timebase();   /* SysTick 1 ms timebase + duty_1000hz */
-    UsartInit();             /* UART0 debug @115200 */
+    UsartInit();             /* UART0 debug @115200 (kept for optional use) */
+    OLED_init();             /* SSD1306 over I2C1 (PB2/PB3) — debug display */
+
+    OLED_clear();
+    OLED_setCursor(0, 0);
+    OLED_writeString("my_car Phase4");
+    OLED_setCursor(0, 1);
+    OLED_writeString("Encoder + PID");
+    OLED_display();
 
     Car.Tasks = &s_task;     /* zero-inited (static): CarStartFlag=0 */
     BuzzerInit(&Car.Buzzer);
-    MotorInit(&Car.Motors);  /* TB6612: STBY on, TIMA0 running, wheels stopped */
+    MotorInit(&Car.Motors);  /* motors + encoders + PIDs; TB6612 live, wheels stopped */
 
     TimerInit();             /* 200 Hz control tick -> duty_200hz/100hz/10hz */
 
-    uart0_send_string("\r\nmy_car Phase3: TB6612 open-loop test. Press S2 (PB21) to run pattern.\r\n");
-
-    int8_t lastReport = -1;
     while (1) {
-        if (Car.Tasks->CarStartFlag != lastReport) {
-            lastReport = Car.Tasks->CarStartFlag;
-            uart0_send_string(lastReport ? "STATE: RUN (motor test)\r\n" : "STATE: STOP\r\n");
-        }
+        /* Live OLED dashboard (while(1) is for display per architecture). */
+        OLED_setCursor(0, 0);
+        OLED_writeString(Car.Tasks->CarStartFlag ? "RUN  set=30cm/s " : "STOP hand-spin  ");
+
+        OLED_setCursor(0, 2);
+        OLED_printf("L V=%-5d cnt=%-4d", (int)Car.Motors->EncoderLeft->V,
+                                          (int)Car.Motors->EncoderLeft->sample);
+        OLED_setCursor(0, 3);
+        OLED_printf("R V=%-5d cnt=%-4d", (int)Car.Motors->EncoderRight->V,
+                                          (int)Car.Motors->EncoderRight->sample);
+
+        OLED_setCursor(0, 5);
+        OLED_printf("Lout=%-5d", (int)Car.Motors->MotorLeft->Output);
+        OLED_setCursor(0, 6);
+        OLED_printf("Rout=%-5d", (int)Car.Motors->MotorRight->Output);
+
+        OLED_display();
     }
 }
 
 /* SysTick-driven 1 kHz duty. */
 void duty_1000hz(void) {}
 
-/* 200 Hz master control tick. */
+/* 200 Hz master control tick: encoder update -> control. */
 void duty_200hz(void)
 {
     KeyDataUpdate(&Car);
+    EncoderDataUpdate(Car.Motors);
 
-    /* Status LED: solid ON when running, OFF when stopped (visual run indicator). */
     if (Car.Tasks->CarStartFlag) {
         DL_GPIO_setPins(GPIO_LED_PORT, GPIO_LED_STATUS_PIN);
+        MotorPidCtrl(Car.Motors, 0.0f, TARGET_SPEED);   /* compute Output (closed loop) */
+        MotorDataUpdate(Car.Motors);                    /* push Output to TB6612 */
     } else {
         DL_GPIO_clearPins(GPIO_LED_PORT, GPIO_LED_STATUS_PIN);
     }
 }
 
-/* 100 Hz (software-divided from 200 Hz). */
-void duty_100hz(void) {}
+/* 100 Hz: stop-protection when idle (wheels held off). */
+void duty_100hz(void)
+{
+    if (!Car.Tasks->CarStartFlag) {
+        MotorStop(Car.Motors);
+    }
+}
 
-/* 10 Hz: buzzer pattern + open-loop motor test stepper. */
+/* 10 Hz: buzzer pattern. */
 void duty_10hz(void)
 {
     BuzzerDataUpdate(Car.Buzzer);
-
-    /* Motor self-test: advance one step every STEP_TICKS_10HZ while running;
-     * hold wheels stopped when not running. */
-    static uint8_t step = 0;
-    static uint8_t divCount = 0;
-    static uint8_t prevRun = 0;
-
-    uint8_t running = Car.Tasks->CarStartFlag ? 1 : 0;
-
-    if (running) {
-        if (!prevRun) {                 /* just started: begin at step 0 immediately */
-            step = 0; divCount = 0;
-            motor_test_step(step);
-            uart0_send_string("  step: ");
-            uart0_send_string(s_stepName[step]);
-            uart0_send_string("\r\n");
-        } else if (++divCount >= STEP_TICKS_10HZ) {
-            divCount = 0;
-            step = (uint8_t)((step + 1) % 6);
-            motor_test_step(step);
-            uart0_send_string("  step: ");
-            uart0_send_string(s_stepName[step]);
-            uart0_send_string("\r\n");
-        }
-    } else if (prevRun) {               /* just stopped: wheels off */
-        MotorStop(Car.Motors);
-    }
-
-    prevRun = running;
 }
