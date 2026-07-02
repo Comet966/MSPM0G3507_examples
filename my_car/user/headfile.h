@@ -29,7 +29,7 @@
 /* ---- FunctionalModule layer ---- */
 #include "MotorsCtrl.h"  /* Phase 3 */
 #include "Encoder.h"     /* Phase 4 */
-/* #include "GraySensor.h"  (Phase 5) */
+#include "GraySensor.h"  /* Phase 5 */
 #include "Buzzer.h"      /* Phase 2 */
 #include "Key.h"         /* Phase 2 */
 #include "oled.h"        /* Phase 7 (pulled in early as a debug display) */

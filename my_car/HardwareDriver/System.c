@@ -55,16 +55,31 @@ uint32_t micros(void)
     return ms * 1000U + (elapsed_cycles / (s_ticks_per_ms / 1000U));
 }
 
+/*
+ * ISR-safe busy-wait: counts SysTick->VAL hardware ticks directly.
+ * Works even when SysTick IRQ is blocked by a same-priority ISR (e.g. 200 Hz
+ * control tick), because the SysTick counter runs regardless of TICKINT.
+ * Handles the down-counter rollover (reload on underflow).
+ */
 void delay_us(uint32_t us)
 {
-    uint32_t start = micros();
-    while ((micros() - start) < us) { /* busy-wait */ }
+    /* 80 cycles per µs at 80 MHz */
+    uint32_t ticks = us * (CPUCLK_FREQ / 1000000U);
+    uint32_t told  = SysTick->VAL;
+    uint32_t tcnt  = 0;
+    while (tcnt < ticks) {
+        uint32_t tnow = SysTick->VAL;
+        if (tnow != told) {
+            tcnt += (tnow < told) ? (told - tnow)
+                                  : (SysTick->LOAD - tnow + told);
+            told = tnow;
+        }
+    }
 }
 
 void delay_ms(uint32_t ms)
 {
-    uint32_t start = millis();
-    while ((millis() - start) < ms) { /* busy-wait */ }
+    delay_us(ms * 1000U);
 }
 
 void Delay_Ms(uint32_t ms) { delay_ms(ms); }
