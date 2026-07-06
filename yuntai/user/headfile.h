@@ -59,9 +59,9 @@
  * Calibrate Kp on-bench: move gimbal a known angle, count pixels that shift. */
 #define VIS_COARSE_THRESH       20          /* px: |center err| to enter fine phase */
 #define VIS_DEAD_ZONE           1           /* steps: suppress moves smaller than this */
-#define VIS_KP_COARSE           0.08f       /* gain for coarse (center) error */
-#define VIS_KP_FINE             0.05f       /* gain for fine (base-point) error */
-#define STEP_SPS_COARSE         2000U       /* sps while acquiring (coarse) */
-#define STEP_SPS_FINE           800U        /* sps while tracking (fine) */
+#define VIS_KP_COARSE           0.25f       /* gain for coarse (center) error */
+#define VIS_KP_FINE             0.15f       /* gain for fine (base-point) error */
+#define STEP_SPS_COARSE         3000U       /* sps while acquiring (coarse) */
+#define STEP_SPS_FINE           1500U       /* sps while tracking (fine) */
 
 #endif /* __HEADFILE_H */

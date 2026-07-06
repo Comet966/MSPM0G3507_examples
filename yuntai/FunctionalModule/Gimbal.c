@@ -110,17 +110,9 @@ void Gimbal_Enable(bool on)
 
 void Gimbal_AimVision(Vision_t *v)
 {
-    /* Fractional step accumulators: sub-step remainders carry over frame-to-frame
-     * so small pixel errors (< 1/Kp px) still accumulate into real motor steps
-     * instead of being rounded away each frame. Reset on target-lost. */
-    static float acc_pan  = 0.0f;
-    static float acc_tilt = 0.0f;
-
     if (!v || v->Flag != VISION_FLAG_TRACK) {
         Stepper_Stop(STEPPER_PAN);
         Stepper_Stop(STEPPER_TILT);
-        acc_pan  = 0.0f;
-        acc_tilt = 0.0f;
         return;
     }
 
@@ -132,20 +124,19 @@ void Gimbal_AimVision(Vision_t *v)
     int16_t  ey  = coarse ? v->DyCenter     : v->DyBase;
     uint16_t spd = coarse ? STEP_SPS_COARSE : STEP_SPS_FINE;
 
-    /* Accumulate fractional steps; extract whole steps to move. */
-    acc_pan  += -(kp * (float)ex);
-    acc_tilt += -(kp * (float)ey);
-
-    int32_t dp = (int32_t)acc_pan;
-    int32_t dt = (int32_t)acc_tilt;
-    acc_pan  -= (float)dp;
-    acc_tilt -= (float)dt;
+    /* Negative sign: positive pixel error means target is ahead of laser,
+     * so we move in the positive direction to close the gap. Whether that
+     * maps to +steps or -steps depends on physical mounting; flip
+     * GIMBAL_PAN_INVERT / GIMBAL_TILT_INVERT in headfile.h if reversed. */
+    int32_t dp = -(int32_t)lroundf(kp * (float)ex);
+    int32_t dt = -(int32_t)lroundf(kp * (float)ey);
 
     Stepper_SetSpeed(STEPPER_PAN,  spd);
     Stepper_SetSpeed(STEPPER_TILT, spd);
 
-    /* Only issue a new move when the axis is idle — prevents the 100 Hz
-     * interrupt-and-restart cycle that causes chatter. */
+    /* Only issue a new Move when the axis is idle — avoids repeated stopCounter
+     * calls at 100 Hz which cause the motor to restart before completing a step
+     * and produce jitter. The next frame will re-evaluate and re-issue if needed. */
     if (abs((int)dp) >= VIS_DEAD_ZONE && !Stepper_Busy(STEPPER_PAN))
         Stepper_Move(STEPPER_PAN,  dp);
     if (abs((int)dt) >= VIS_DEAD_ZONE && !Stepper_Busy(STEPPER_TILT))
