@@ -38,7 +38,7 @@
 /* Direction polarity: flip if a positive angle command turns the axis the wrong way
  * (software alternative to swapping the motor A+/A- pair, see profiles/bujin.md). */
 #define GIMBAL_PAN_INVERT       0
-#define GIMBAL_TILT_INVERT      0
+#define GIMBAL_TILT_INVERT      1
 
 /* --- Step speed ---
  * STEP pulse timers run at 4 MHz (PWM_*_INST_CLK_FREQ). A step rate of f_step Hz
