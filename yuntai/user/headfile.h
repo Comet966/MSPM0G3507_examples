@@ -52,4 +52,16 @@
  * K230 sends a frame every 10 ms; treat the link as stale after this many ms. */
 #define VISION_STALE_MS         100U
 
+/* --- Vision closed-loop tuning ---
+ * Coarse phase: drive on DxCenter/DyCenter at higher speed until error < THRESH.
+ * Fine phase:   drive on DxBase/DyBase at lower speed.
+ * Kp: pixel error -> steps  (1 px * Kp = step count to move).
+ * Calibrate Kp on-bench: move gimbal a known angle, count pixels that shift. */
+#define VIS_COARSE_THRESH       20          /* px: |center err| to enter fine phase */
+#define VIS_DEAD_ZONE           1           /* steps: suppress moves smaller than this */
+#define VIS_KP_COARSE           0.08f       /* gain for coarse (center) error */
+#define VIS_KP_FINE             0.05f       /* gain for fine (base-point) error */
+#define STEP_SPS_COARSE         2000U       /* sps while acquiring (coarse) */
+#define STEP_SPS_FINE           800U        /* sps while tracking (fine) */
+
 #endif /* __HEADFILE_H */

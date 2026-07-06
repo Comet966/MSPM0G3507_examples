@@ -1,6 +1,7 @@
 #include "Gimbal.h"
 #include "Stepper.h"
 #include "headfile.h"
+#include <stdlib.h>
 
 /*
  * Angle <-> step conversion for the 2-axis gimbal.
@@ -109,17 +110,32 @@ void Gimbal_Enable(bool on)
 
 void Gimbal_AimVision(Vision_t *v)
 {
-    (void)v;
-    /* TODO(vision closed loop):
-     *   if (v->Flag == 0xBB) {
-     *       // Use DxBase/DyBase for fine aim at the active reference point.
-     *       // Map pixel error -> small MoveBy (or a proper PID on the error),
-     *       // e.g. Gimbal_MoveByPan(-Kp_x * v->DxBase);
-     *       //      Gimbal_MoveByTilt(-Kp_y * v->DyBase);
-     *   } else {                       // 0xCC: target lost
-     *       Stepper_Stop(...);         // hold position, wait for re-acquire
-     *   }
-     */
+    if (!v || v->Flag != VISION_FLAG_TRACK) {
+        Stepper_Stop(STEPPER_PAN);
+        Stepper_Stop(STEPPER_TILT);
+        return;
+    }
+
+    bool coarse = (abs((int)v->DxCenter) > VIS_COARSE_THRESH ||
+                   abs((int)v->DyCenter) > VIS_COARSE_THRESH);
+
+    float    kp  = coarse ? VIS_KP_COARSE   : VIS_KP_FINE;
+    int16_t  ex  = coarse ? v->DxCenter     : v->DxBase;
+    int16_t  ey  = coarse ? v->DyCenter     : v->DyBase;
+    uint16_t spd = coarse ? STEP_SPS_COARSE : STEP_SPS_FINE;
+
+    /* Negative sign: positive pixel error means target is ahead of laser,
+     * so we move in the positive direction to close the gap. Whether that
+     * maps to +steps or -steps depends on physical mounting; flip
+     * GIMBAL_PAN_INVERT / GIMBAL_TILT_INVERT in headfile.h if reversed. */
+    int32_t dp = -(int32_t)lroundf(kp * (float)ex);
+    int32_t dt = -(int32_t)lroundf(kp * (float)ey);
+
+    Stepper_SetSpeed(STEPPER_PAN,  spd);
+    Stepper_SetSpeed(STEPPER_TILT, spd);
+
+    if (abs((int)dp) >= VIS_DEAD_ZONE) Stepper_Move(STEPPER_PAN,  dp);
+    if (abs((int)dt) >= VIS_DEAD_ZONE) Stepper_Move(STEPPER_TILT, dt);
 }
 
 void Gimbal_AimGeometry(float x, float y)

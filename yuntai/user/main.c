@@ -1,50 +1,65 @@
 #include "headfile.h"
 #include "oled.h"
+#include <stdlib.h>
 
 /*
- * Vision decode verification via OLED (SSD1306 128x64, I2C1, PB2/PB3).
+ * Milestone 2: vision closed-loop gimbal control.
  *
- * Display layout (8 rows × 16 chars, 8×8 font):
- *   Row 0: "VISION TEST"
- *   Row 1: flag + fresh indicator   e.g. "FL:BB  Fr:1"
- *   Row 2: center dx/dy             e.g. "Cx:+012 Cy:-034"
- *   Row 3: base index               e.g. "Base:07"
- *   Row 4: base dx/dy               e.g. "Bx:+100 By:+002"
- *   Row 5: frame count              e.g. "N:000123"
- *   Row 6: (spare)
- *   Row 7: LED blink indicator      e.g. "* "  (toggles each refresh)
+ * Main loop polls for new K230 frames (by FrameCount change) and calls
+ * Gimbal_AimVision every frame (~100 Hz). Laser is on at all times.
+ * OLED refreshes at 5 Hz to show live state without blocking the control loop.
  *
- * LED2 (PB27) blinks at 1 Hz always — confirms main loop is alive even if
- * OLED wiring is wrong.
+ * OLED layout (8 cols × 8 rows, 8×8 font):
+ *   Row 0: flag + coarse/fine indicator   "BB FINE " / "BB CORS " / "CC ---- "
+ *   Row 1: center error                   "Cx:+008 Cy:-012"
+ *   Row 2: base-point error               "Bx:+003 By:+001"
+ *   Row 3: base index                     "Base: 07"
+ *   Row 4: PAN  step position             "Pan:+01234"
+ *   Row 5: TILT step position             "Tlt: -0567"
+ *   Row 6: frame count                    "N:001234"
+ *   Row 7: 1 Hz blink dot                 "*"
  */
 
-static void oled_show(Vision_t *v)
+static void oled_refresh(Vision_t *v)
 {
-    bool fresh = Vision_IsFresh();
+    bool fresh  = Vision_IsFresh();
+    bool track  = fresh && (v->Flag == VISION_FLAG_TRACK);
+    bool coarse = track && (abs((int)v->DxCenter) > VIS_COARSE_THRESH ||
+                            abs((int)v->DyCenter) > VIS_COARSE_THRESH);
 
     OLED_clear();
 
+    /* Row 0: status */
     OLED_setCursor(0, 0);
-    OLED_writeString("VISION  TEST");
+    if (!fresh)       OLED_writeString("NO SIGNAL  ");
+    else if (!track)  OLED_writeString("CC LOST    ");
+    else if (coarse)  OLED_writeString("BB COARSE  ");
+    else              OLED_writeString("BB FINE    ");
 
+    /* Row 1: center error */
     OLED_setCursor(0, 1);
-    OLED_printf("FL:%02X  Fr:%c", v->Flag, fresh ? '1' : '0');
-
-    OLED_setCursor(0, 2);
-    /* dx/dy are signed int16; print sign explicitly to fit in 16 chars */
     OLED_printf("Cx:%c%03d Cy:%c%03d",
-                 v->DxCenter >= 0 ? '+' : '-', (int)(v->DxCenter < 0 ? -v->DxCenter : v->DxCenter),
-                 v->DyCenter >= 0 ? '+' : '-', (int)(v->DyCenter < 0 ? -v->DyCenter : v->DyCenter));
+                v->DxCenter >= 0 ? '+' : '-', abs((int)v->DxCenter),
+                v->DyCenter >= 0 ? '+' : '-', abs((int)v->DyCenter));
 
+    /* Row 2: base-point error */
+    OLED_setCursor(0, 2);
+    OLED_printf("Bx:%c%03d By:%c%03d",
+                v->DxBase >= 0 ? '+' : '-', abs((int)v->DxBase),
+                v->DyBase >= 0 ? '+' : '-', abs((int)v->DyBase));
+
+    /* Row 3: base index */
     OLED_setCursor(0, 3);
     OLED_printf("Base: %02u", (unsigned)v->BaseIndex);
 
+    /* Row 4/5: step positions */
     OLED_setCursor(0, 4);
-    OLED_printf("Bx:%c%03d By:%c%03d",
-                 v->DxBase >= 0 ? '+' : '-', (int)(v->DxBase < 0 ? -v->DxBase : v->DxBase),
-                 v->DyBase >= 0 ? '+' : '-', (int)(v->DyBase < 0 ? -v->DyBase : v->DyBase));
-
+    OLED_printf("Pan:%+06ld", (long)Stepper_Position(STEPPER_PAN));
     OLED_setCursor(0, 5);
+    OLED_printf("Tlt:%+06ld", (long)Stepper_Position(STEPPER_TILT));
+
+    /* Row 6: frame count */
+    OLED_setCursor(0, 6);
     OLED_printf("N:%06lu", (unsigned long)v->FrameCount);
 
     OLED_display();
@@ -64,28 +79,35 @@ int main(void)
     Gimbal_t *gimbal;
     Gimbal_Init(&gimbal);
 
+    Laser_Set(true);
+
     /* splash */
     OLED_clear();
-    OLED_setCursor(0, 0);
-    OLED_writeString("VISION TEST");
-    OLED_setCursor(0, 2);
-    OLED_writeString("waiting K230...");
+    OLED_setCursor(0, 0); OLED_writeString("YUNTAI  v2");
+    OLED_setCursor(0, 2); OLED_writeString("waiting K230");
     OLED_display();
 
-    uint32_t t_display = millis();
-    uint32_t t_led     = millis();
-    bool     led_state = false;
+    uint32_t last_frame   = 0;
+    uint32_t t_oled       = millis();
+    uint32_t t_led        = millis();
+    bool     led_state    = false;
 
     while (1) {
         uint32_t now = millis();
 
-        /* refresh OLED every 100 ms */
-        if (now - t_display >= 100) {
-            t_display = now;
-            oled_show(vision);
+        /* --- Closed-loop control: run on every new vision frame --- */
+        if (vision->FrameCount != last_frame) {
+            last_frame = vision->FrameCount;
+            Gimbal_AimVision(vision);
         }
 
-        /* 1 Hz LED blink — proof of life */
+        /* --- OLED refresh at 5 Hz (200 ms) --- */
+        if (now - t_oled >= 200) {
+            t_oled = now;
+            oled_refresh(vision);
+        }
+
+        /* --- LED2 1 Hz blink: proof of life --- */
         if (now - t_led >= 500) {
             t_led     = now;
             led_state = !led_state;
