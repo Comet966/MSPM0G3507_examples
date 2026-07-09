@@ -46,10 +46,8 @@ typedef struct
     uint8_t Ready;    /* 1 once a valid frame has been parsed */
 } Imu_t;
 
-/* 感为 (Ganwei) 8-way DIGITAL line sensor.
- * Bits come straight from LineWalk_read(): bit0=CH1 (leftmost) .. bit7=CH8.
- * Convention in this project: 1 = line detected (black/dark under sensor), 0 = white.
- * (LineWalk_read returns 1=white; GraySensorDataUpdate inverts to this convention.) */
+/* 感为 (Ganwei) 7-way DIGITAL line sensor, parallel mode.
+ * bit0=CH1 (leftmost) .. bit6=CH7 (rightmost). 1 = line detected. */
 typedef struct
 {
     uint8_t bit0 : 1;
@@ -59,8 +57,7 @@ typedef struct
     uint8_t bit4 : 1;
     uint8_t bit5 : 1;
     uint8_t bit6 : 1;
-    uint8_t bit7 : 1;
-    uint8_t BinaryData;       /* raw 8-bit field, bit0=CH1 .. bit7=CH8 (line=1) */
+    uint8_t BinaryData;       /* lower 7 bits used: bit0=CH1 .. bit6=CH7 (line=1) */
     uint8_t GraySensorNoData; /* 1 = no channel sees the line (all lost) */
 } GraySensor_t;
 

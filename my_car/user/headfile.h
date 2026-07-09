@@ -42,24 +42,50 @@
 
 /*========================= Tunable parameters =========================*/
 
-/* Wheel-speed PID (per wheel). Retuned for MG513 + this chassis.
- * KD=0: the cm/s feedback is coarsely quantized (~2 counts per 5 ms window at
- * 30 cm/s), so any KD amplifies that noise into output jitter -> wheels dither
- * around zero and flip direction. Start P-dominant, tiny I, no D; add back later. */
+/* Wheel-speed PID (per wheel). MG513 + this chassis, EncoderLines still uncal.
+ * Feedback is coarsely quantized: 1 count/5ms window ~= 14.5 cm/s, so a big KP
+ * turns ±1-count noise into ±145 output swing -> the violent jitter seen when
+ * both wheels run straight (turnAngle=0). Fix: low KP (small proportional kick),
+ * higher KI so the integrator supplies the steady-state duty smoothly, KD=0.
+ * Iout is capped well below Maxout so a stalled wheel can't wind up. */
 #define BrushMotor_PID_mode     PID_POSITION
-#define BrushMotor_PID_KP       10.0f
-#define BrushMotor_PID_KI       0.1f
+#define BrushMotor_PID_KP       3.0f
+#define BrushMotor_PID_KI       0.5f
 #define BrushMotor_PID_KD       0.0f
 #define BrushMotor_PID_Maxout   1000.0f
-#define BrushMotor_PID_MaxIout  1000.0f
+#define BrushMotor_PID_MaxIout  700.0f
 
-/* Self-turn (yaw / differential) PID. */
+/* Self-turn (yaw / differential) PID. Used by the closed-loop MotorPidCtrl path
+ * (currently NOT the line-follow path — see line-follow block below). */
 #define SelfTurn_PID_mode       PID_POSITION
-#define SelfTurn_PID_KP         0.8f
+#define SelfTurn_PID_KP         0.3f
 #define SelfTurn_PID_KI         0.0f
 #define SelfTurn_PID_KD         0.15f
 #define SelfTurn_PID_Maxout     200.0f
 #define SelfTurn_PID_MaxIout    10.0f
+
+/* Line-following: open-loop base throttle + proportional steer (MotorLineFollow).
+ * Deliberately bypasses the wheel-speed PID because EncoderLines is still
+ * uncalibrated (Task #14) — velocity feedback is quantized ~14.5 cm/s/count, too
+ * coarse to hold a low speed, which is why the closed-loop path jittered instead of
+ * driving forward. A fixed base duty guarantees forward motion; steer splits it into
+ * a differential.
+ *
+ * turnAngle (GraySensorToTurnAngle) is ~[-30,+30], POSITIVE = line to the LEFT.
+ * Correct-sign mapping (steer the car toward the line):
+ *   left  = base - Kp*turnAngle   (line left → left wheel slower → curve left)
+ *   right = base + Kp*turnAngle
+ * PWM_SetDuty clamps to +-1000, so a large steer that drives one wheel negative just
+ * pivots that wheel (sharp turn) — safe. */
+#define LineFollow_BaseDuty     80      /* forward duty 0..1000 (~8%, crawl). Likely below the MG513 stall threshold —
+                                         * if a wheel buzzes without turning or the two wheels start unevenly, raise it. */
+#define LineFollow_SteerKp      2.5f    /* duty per unit turnAngle; scaled down with BaseDuty so slow speed doesn't
+                                         * over-steer (a low base makes the same steer a bigger fraction). raise=sharper */
+#define MOTOR_SWAP_LR           0       /* set to 1 ONLY if on-board test shows the L/R wheels are physically swapped */
+#define MOTOR_INVERT_DIR        1       /* 1 = flip forward/reverse polarity. On-board test showed +duty spun the
+                                         * wheels backward (motor leads rewired since Phase 3). Negating both wheels
+                                         * equally also keeps steering correct — it only reverses travel direction.
+                                         * Set back to 0 if the motor leads are ever restored to Phase-3 wiring. */
 
 /* Mechanical / odometry constants. */
 #define ControlFrequency        200.0f   /* Hz, master control-loop rate */

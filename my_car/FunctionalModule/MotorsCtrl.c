@@ -80,6 +80,43 @@ void MotorPidCtrl(Motors_t* Motors, fp32 turnAngle, fp32 avgSpeed)
 
 void MotorDataUpdate(Motors_t* Motors)
 {
-    PWM_SetDuty((int16_t)Motors->MotorLeft->Output,
-                (int16_t)Motors->MotorRight->Output);
+    /* Single hardware choke point — direction/swap fixups applied here so every
+     * drive path (line-follow, PID, open-loop, stop) stays coherent. */
+    int16_t l = (int16_t)Motors->MotorLeft->Output;
+    int16_t r = (int16_t)Motors->MotorRight->Output;
+
+#if MOTOR_INVERT_DIR
+    l = (int16_t)(-l);   /* flip forward/reverse (both wheels equally → steering preserved) */
+    r = (int16_t)(-r);
+#endif
+
+#if MOTOR_SWAP_LR
+    PWM_SetDuty(r, l);   /* physical L/R wheels swapped */
+#else
+    PWM_SetDuty(l, r);
+#endif
+}
+
+/*
+ * Line-following drive (Phase 5): open-loop base duty + proportional steer.
+ *
+ * Unlike MotorPidCtrl, this does NOT use the wheel-speed PID or encoder feedback —
+ * EncoderLines is uncalibrated, so the velocity loop can't hold a low setpoint and
+ * collapses into jitter. A fixed base duty guarantees forward motion; the steer term
+ * splits it into a left/right differential with the CORRECT sign:
+ *   turnAngle > 0  => line is to the LEFT  => slow the left wheel, car curves left.
+ *
+ * turnAngle: from GraySensorToTurnAngle(), ~[-30,+30], 0 = line centered.
+ */
+void MotorLineFollow(Motors_t* Motors, fp32 turnAngle)
+{
+    fp32 steer = LineFollow_SteerKp * turnAngle;
+
+    int left  = (int)(LineFollow_BaseDuty - steer);
+    int right = (int)(LineFollow_BaseDuty + steer);
+
+    Motors->MotorLeft->Output  = left;
+    Motors->MotorRight->Output = right;
+
+    MotorDataUpdate(Motors);   /* PWM_SetDuty clamps to +-1000 and coasts on 0 */
 }

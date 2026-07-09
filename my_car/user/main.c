@@ -4,12 +4,12 @@ Car_t Car;
 
 static Task_t s_task;
 
-/* Phase 5: line-sensor + closed-loop line-following test.
+/* Phase 5: line-sensor + open-loop line-following.
  * Stopped: OLED shows live 8-bit sensor reading + turn angle (hand the car over
- *          the line to confirm correct polarity before pressing S2).
- * Running (press S2): GraySensorDataUpdate -> turnAngle -> MotorPidCtrl (closed loop).
- * Press S2 again to stop. */
-#define TARGET_SPEED  25.0f   /* cm/s forward setpoint for line-follow test */
+ *          the line to confirm correct polarity before starting).
+ * Running (press S2 or IR remote): GraySensorToTurnAngle -> MotorLineFollow
+ *          (base duty + proportional steer, no velocity loop).
+ * Press S2 / IR again to stop. Tunables: LineFollow_BaseDuty / _SteerKp in headfile.h. */
 
 int main(void)
 {
@@ -74,17 +74,41 @@ void duty_1000hz(void) {}
 void duty_200hz(void)
 {
     KeyDataUpdate(&Car);
+    IrDataUpdate(&Car);      /* IR remote = second start/stop, same toggle as S2 */
     EncoderDataUpdate(Car.Motors);
 
-    /* GraySensorDataUpdate runs in while(1) — reads cached Deltayaw here. */
+    /* GraySensorDataUpdate runs in while(1) — reads cached Deltayaw here.
+     *
+     * Line-lost grace: a thin line dropping into the GAP between two channels reads
+     * as "no line" for a few frames — happens most on straights where the line sits
+     * dead-centre between the middle sensors. Stopping instantly on that made the car
+     * freeze mid-track. So on a brief dropout we KEEP driving with the last steering
+     * command (Deltayaw is held, MotorLineFollow keeps the base duty), and only stop
+     * once the line has been absent for LINE_LOST_STOP_SAMPLES consecutive ticks
+     * (~0.4 s @200 Hz) — that long a gap means genuinely off-track, not a sensor gap. */
+    #define LINE_LOST_STOP_SAMPLES  80   /* ~0.4 s @200 Hz before a real stop */
+    static uint16_t lineLostCount = 0;
+
     if (Car.Tasks->CarStartFlag) {
         DL_GPIO_setPins(GPIO_LED_PORT, GPIO_LED_STATUS_PIN);
 
         if (!Car.GraySensor->GraySensorNoData) {
-            MotorPidCtrl(Car.Motors, Car.Tasks->Deltayaw, TARGET_SPEED);
-            MotorDataUpdate(Car.Motors);
+            lineLostCount = 0;
+            /* Open-loop base duty + proportional steer (see MotorLineFollow).
+             * Bypasses the uncalibrated wheel-speed PID so the car actually drives
+             * forward; steering sign is corrected there. */
+            MotorLineFollow(Car.Motors, Car.Tasks->Deltayaw);
+        } else if (lineLostCount < LINE_LOST_STOP_SAMPLES) {
+            /* Brief dropout — line is almost certainly still under the array, just in
+             * a sensor gap. Hold the last steering and keep driving through it. */
+            lineLostCount++;
+            MotorLineFollow(Car.Motors, Car.Tasks->Deltayaw);
+        } else {
+            /* Line gone long enough → truly off-track. Coast to a stop. */
+            MotorStop(Car.Motors);
         }
     } else {
+        lineLostCount = 0;
         DL_GPIO_clearPins(GPIO_LED_PORT, GPIO_LED_STATUS_PIN);
     }
 }

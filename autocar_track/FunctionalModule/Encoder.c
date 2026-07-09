@@ -2,11 +2,6 @@
 #include "Encoder.h"
 #include "EncoderExti.h"
 
-/*
- * Two-wheel odometry. The encoders are allocated here (static) and hung off the
- * Motors_t aggregate, then EncoderExti wires the ISR to their EncoderCount.
- */
-
 static void encoder_zero(Encoder_t* e)
 {
     e->EncoderCount = 0;
@@ -27,7 +22,7 @@ void EncodersInit(Motors_t* Motors)
     encoder_zero(Motors->EncoderLeft);
     encoder_zero(Motors->EncoderRight);
 
-    EncoderExtiInit();   /* enable GPIOB interrupt now that counters exist */
+    EncoderExtiInit();
 }
 
 void EncoderDataUpdate(Motors_t* Motors)
@@ -35,23 +30,18 @@ void EncoderDataUpdate(Motors_t* Motors)
     Encoder_t* L = Motors->EncoderLeft;
     Encoder_t* R = Motors->EncoderRight;
 
-    /* Snapshot + clear the ISR counters (brief; ISR only ticks these). */
     L->sample = L->EncoderCount;  L->EncoderCount = 0;
     R->sample = R->EncoderCount;  R->EncoderCount = 0;
 
-    /* counts/window -> rad/s : (counts * f_ctrl / lines_per_rev) * 2*PI */
     const float k = (ControlFrequency / EncoderLines) * 2.0f * PI;
 
-    /* Low-pass (0.1 new / 0.9 old, ~50 ms tau) to tame the coarse quantization
-     * at 200 Hz: 1 count = ~14.5 cm/s, so raw V jumps in big steps. Heavy
-     * filtering keeps the PID feedback smooth enough not to reverse-swing. */
     L->vel = (L->sample * k) * 0.1f + L->vel * 0.9f;
     R->vel = (R->sample * k) * 0.1f + R->vel * 0.9f;
 
-    L->V = L->vel * TireRadius;   /* cm/s */
+    L->V = L->vel * TireRadius;
     R->V = R->vel * TireRadius;
 
-    L->X += L->V / ControlFrequency;  /* cm */
+    L->X += L->V / ControlFrequency;
     R->X += R->V / ControlFrequency;
 }
 

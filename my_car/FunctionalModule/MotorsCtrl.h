@@ -22,8 +22,15 @@ void MotorStop(Motors_t* Motors);             /* zero both wheels (keeps driver 
 void MotorSetOpenLoop(Motors_t* Motors, int16_t left, int16_t right);
 
 /* Phase 4 closed-loop: turnAngle (steering, +=turn one way) + avgSpeed (cm/s).
- * Runs self-turn PID then per-wheel speed PID; writes each motor's Output. */
+ * Runs self-turn PID then per-wheel speed PID; writes each motor's Output.
+ * NOTE: needs a calibrated EncoderLines to hold speed — see MotorLineFollow for the
+ * open-loop path currently used by Phase 5. */
 void MotorPidCtrl(Motors_t* Motors, fp32 turnAngle, fp32 avgSpeed);
+
+/* Phase 5 line-follow: open-loop base duty + proportional steer (no encoder needed).
+ * turnAngle from GraySensorToTurnAngle (+ = line to the left). Guarantees forward
+ * motion; corrects the steering-sign bug of the closed-loop path. */
+void MotorLineFollow(Motors_t* Motors, fp32 turnAngle);
 
 /* Push each motor's Output field to hardware (direction + PWM). */
 void MotorDataUpdate(Motors_t* Motors);
