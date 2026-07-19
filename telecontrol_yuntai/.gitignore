@@ -1,0 +1,7 @@
+# CCS/SysConfig build outputs
+Debug/
+Release/
+
+# Local IDE/agent settings
+.claude/
+.settings/
